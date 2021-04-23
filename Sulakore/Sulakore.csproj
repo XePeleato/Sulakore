@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFramework>netstandard2.1</TargetFramework>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 
     <LocalFlazzy>..\Submodules\Flazzy\Flazzy\Flazzy.csproj</LocalFlazzy>
@@ -21,14 +21,18 @@
   <Choose>
     <When Condition="Exists($(ParentFlazzy))">
       <ItemGroup>
-        <ProjectReference Include="$(ParentFlazzy)"/>
+        <ProjectReference Include="$(ParentFlazzy)" />
       </ItemGroup>
     </When>
     <Otherwise>
       <ItemGroup>
-        <ProjectReference Include="$(LocalFlazzy)"/>
+        <ProjectReference Include="$(LocalFlazzy)" />
       </ItemGroup>
     </Otherwise>
   </Choose>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="11.0.2" />
+  </ItemGroup>
 
 </Project>

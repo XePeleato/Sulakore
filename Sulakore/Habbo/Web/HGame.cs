@@ -43,7 +43,7 @@ namespace Sulakore.Habbo.Web
             "var", "while", "with"
         };
 
-        public List<ABCFile> ABCFiles { get; }
+        public static List<ABCFile> ABCFiles { get; } = new List<ABCFile>();
         public bool IsPostShuffle { get; private set; } = true;
 
         public SortedDictionary<ushort, MessageItem> InMessages { get; }
@@ -57,7 +57,7 @@ namespace Sulakore.Habbo.Web
             {
                 if (ABCFiles.Count >= 3)
                 {
-                    return ABCFiles.Last().Pool.Strings[_revisionIndex];
+                    return ABCFiles[2].Pool.Strings[_revisionIndex];
                 }
                 else return "PRODUCTION-000000000000-000000000";
             }
@@ -92,7 +92,7 @@ namespace Sulakore.Habbo.Web
             _abcFileTags = new Dictionary<DoABCTag, ABCFile>();
             _messages = new Dictionary<ASClass, MessageItem>();
 
-            ABCFiles = new List<ABCFile>();
+            //ABCFiles = new List<ABCFile>();
             InMessages = new SortedDictionary<ushort, MessageItem>();
             OutMessages = new SortedDictionary<ushort, MessageItem>();
             Messages = new SortedDictionary<string, List<MessageItem>>();
@@ -352,6 +352,22 @@ namespace Sulakore.Habbo.Web
         }
         #endregion
 
+
+        public void GenHashesV2()
+        {
+            foreach (MessageItem message in OutMessages.Values.Concat(InMessages.Values))
+            {
+                List<MessageItem> group = null;
+                //message.Parser.Traits
+                if (!Messages.TryGetValue(message.GenerateHash(), out group))
+                {
+                    group = new List<MessageItem>();
+                    Messages.Add(message.Hash, group);
+                }
+                group.Add(message);
+            }
+        }
+
         public void GenerateMessageHashes()
         {
             FindMessagesReferences();
@@ -370,39 +386,40 @@ namespace Sulakore.Habbo.Web
         private void FindMessagesReferences()
         {
             int classRank = 1;
-            ABCFile abc = ABCFiles.Last();
-            foreach (ASClass @class in abc.Classes)
-            {
-                ASInstance instance = @class.Instance;
-                if (_messages.ContainsKey(@class)) continue;
-                if (instance.Flags.HasFlag(ClassFlags.Interface)) continue;
-
-                IEnumerable<ASMethod> methods = (new[] { @class.Constructor, instance.Constructor })
-                    .Concat(instance.GetMethods())
-                    .Concat(@class.GetMethods());
-
-                int methodRank = 0;
-                foreach (ASMethod fromMethod in methods)
+            foreach (var abc in ABCFiles) {
+                foreach (ASClass @class in abc.Classes)
                 {
-                    bool isStatic = fromMethod.Trait?.IsStatic ?? @class.Constructor == fromMethod;
-                    var fromContainer = isStatic ? (ASContainer)@class : instance;
+                    ASInstance instance = @class.Instance;
+                    if (_messages.ContainsKey(@class)) continue;
+                    if (instance.Flags.HasFlag(ClassFlags.Interface)) continue;
 
-                    List<MessageReference> refernces = FindMessageReferences(@class, fromContainer, fromMethod);
-                    if (refernces.Count > 0)
+                    IEnumerable<ASMethod> methods = (new[] { @class.Constructor, instance.Constructor })
+                        .Concat(instance.GetMethods())
+                        .Concat(@class.GetMethods());
+
+                    int methodRank = 0;
+                    foreach (ASMethod fromMethod in methods)
                     {
-                        methodRank++;
+                        bool isStatic = fromMethod.Trait?.IsStatic ?? @class.Constructor == fromMethod;
+                        var fromContainer = isStatic ? (ASContainer)@class : instance;
+
+                        List<MessageReference> refernces = FindMessageReferences(@class, fromContainer, fromMethod, new List<int>());
+                        if (refernces.Count > 0)
+                        {
+                            methodRank++;
+                        }
+                        foreach (MessageReference reference in refernces)
+                        {
+                            reference.IsStatic = isStatic;
+                            reference.ClassRank = classRank;
+                            reference.MethodRank = methodRank;
+                            reference.GroupCount = refernces.Count;
+                        }
                     }
-                    foreach (MessageReference reference in refernces)
+                    if (methodRank > 0)
                     {
-                        reference.IsStatic = isStatic;
-                        reference.ClassRank = classRank;
-                        reference.MethodRank = methodRank;
-                        reference.GroupCount = refernces.Count;
+                        classRank++;
                     }
-                }
-                if (methodRank > 0)
-                {
-                    classRank++;
                 }
             }
 
@@ -425,56 +442,59 @@ namespace Sulakore.Habbo.Web
             }
 
             classRank = 1;
-            foreach (ASClass @class in abc.Classes)
+            foreach (var abc in ABCFiles)
             {
-                ASContainer container = null;
-                List<MessageReference> references = null;
-                if (froms.TryGetValue(@class, out references))
+                foreach (ASClass @class in abc.Classes)
                 {
-                    container = @class;
-                }
-                else if (froms.TryGetValue(@class.Instance, out references))
-                {
-                    container = @class.Instance;
-                }
-                if (container != null)
-                {
-                    var methodReferenceGroups = new Dictionary<ASMethod, List<MessageReference>>();
-                    foreach (MessageReference reference in references)
+                    ASContainer container = null;
+                    List<MessageReference> references = null;
+                    if (froms.TryGetValue(@class, out references))
                     {
-                        reference.FromClass = @class;
-                        reference.InstructionRank = -1;
-                        reference.ClassRank = classRank;
-                        reference.IsStatic = container.IsStatic;
-                        reference.GroupCount = references.Count;
-
-                        List<MessageReference> methodReferences = null;
-                        if (!methodReferenceGroups.TryGetValue(reference.FromMethod, out methodReferences))
-                        {
-                            methodReferences = new List<MessageReference>();
-                            methodReferenceGroups.Add(reference.FromMethod, methodReferences);
-                        }
-                        methodReferences.Add(reference);
+                        container = @class;
                     }
-
-                    int methodRank = 1;
-                    foreach (ASMethod method in container.GetMethods())
+                    else if (froms.TryGetValue(@class.Instance, out references))
                     {
-                        List<MessageReference> methodReferences = null;
-                        if (methodReferenceGroups.TryGetValue(method, out methodReferences))
+                        container = @class.Instance;
+                    }
+                    if (container != null)
+                    {
+                        var methodReferenceGroups = new Dictionary<ASMethod, List<MessageReference>>();
+                        foreach (MessageReference reference in references)
                         {
-                            foreach (MessageReference reference in methodReferences)
+                            reference.FromClass = @class;
+                            reference.InstructionRank = -1;
+                            reference.ClassRank = classRank;
+                            reference.IsStatic = container.IsStatic;
+                            reference.GroupCount = references.Count;
+
+                            List<MessageReference> methodReferences = null;
+                            if (!methodReferenceGroups.TryGetValue(reference.FromMethod, out methodReferences))
                             {
-                                reference.MethodRank = methodRank;
+                                methodReferences = new List<MessageReference>();
+                                methodReferenceGroups.Add(reference.FromMethod, methodReferences);
                             }
-                            methodRank++;
+                            methodReferences.Add(reference);
                         }
+
+                        int methodRank = 1;
+                        foreach (ASMethod method in container.GetMethods())
+                        {
+                            List<MessageReference> methodReferences = null;
+                            if (methodReferenceGroups.TryGetValue(method, out methodReferences))
+                            {
+                                foreach (MessageReference reference in methodReferences)
+                                {
+                                    reference.MethodRank = methodRank;
+                                }
+                                methodRank++;
+                            }
+                        }
+                        classRank++;
                     }
-                    classRank++;
                 }
             }
         }
-        private List<MessageReference> FindMessageReferences(ASClass fromClass, ASContainer fromContainer, ASMethod fromMethod)
+        private List<MessageReference> FindMessageReferences(ASClass fromClass, ASContainer fromContainer, ASMethod fromMethod, List<int> methodStack)
         {
             int instructionRank = 0;
             ABCFile abc = fromMethod.GetABC();
@@ -483,6 +503,8 @@ namespace Sulakore.Habbo.Web
             var references = new List<MessageReference>();
 
             ASContainer container = null;
+            GetLexIns prevGLI = null;
+
             ASCode code = fromMethod.Body.ParseCode();
             for (int i = 0; i < code.Count; i++)
             {
@@ -490,11 +512,27 @@ namespace Sulakore.Habbo.Web
                 ASInstruction instruction = code[i];
                 switch (instruction.OP)
                 {
-                    default: continue;
                     case OPCode.NewFunction:
                     {
+                            
                         var newFunction = (NewFunctionIns)instruction;
-                        references.AddRange(FindMessageReferences(fromClass, fromContainer, newFunction.Method));
+
+                            if (methodStack.Contains(newFunction.MethodIndex))
+                            {
+                                methodStack.Clear();
+                                continue;
+                            }
+
+                            if (newFunction.MethodIndex > abc.Methods.Count)
+                                continue;
+
+                            if (fromMethod.Name == "onAvailabilityStatus")
+                                Console.WriteLine("beep");
+
+
+                            methodStack.Add(newFunction.MethodIndex);
+
+                                references.AddRange(FindMessageReferences(fromClass, fromContainer, newFunction.Method, methodStack));
                         continue;
                     }
                     case OPCode.GetProperty:
@@ -520,8 +558,16 @@ namespace Sulakore.Habbo.Web
 
                         extraNamePopCount = constructProp.ArgCount;
                         nameStack.Push(constructProp.PropertyName);
+
+                            var prev = code[i - 1];
+                            if (prev.OP == OPCode.GetLex)
+                            {
+                                prevGLI = (GetLexIns)prev;
+                                nameStack.Push(prevGLI.TypeName);
+                            }
                         break;
                     }
+                    default: continue;
                 }
 
                 ASMultiname messageQName = nameStack.Pop();
@@ -1157,7 +1203,7 @@ namespace Sulakore.Habbo.Web
             return null;
         }
 
-        private void LoadMessages()
+        public void Replace(int oldId, int newId, bool isOut)
         {
             ABCFile abc = ABCFiles.Last();
 
@@ -1190,6 +1236,94 @@ namespace Sulakore.Habbo.Web
             int inMapTypeIndex = habboMessagesClass.Traits[0].QNameIndex;
             int outMapTypeIndex = habboMessagesClass.Traits[1].QNameIndex;
 
+
+            for (var i = 0; i < code.Count; i++)
+            {
+                ASInstruction instr = code[i];
+
+                if (instr.OP == OPCode.PushShort || instr.OP == OPCode.PushByte)
+                {
+                    var primitive = code[i] as Primitive;
+                    ushort id = Convert.ToUInt16(primitive.Value);
+
+                    if (id == oldId)
+                    {
+                        var getLexInst = code[i - 1] as GetLexIns;
+                        bool isOutgoing = getLexInst.TypeNameIndex == outMapTypeIndex;
+
+                        if (isOut == isOutgoing)
+                        {
+                            primitive.Value = (ushort)newId;
+                            code[i] = primitive;
+                        }
+                    }
+                }
+            }
+
+            habboMessagesClass.Constructor.Body.Code = code.ToArray();
+        }
+
+        private void LoadMessages()
+        {
+            ASClass habboMessagesClass = null;
+
+            foreach (var abc in ABCFiles)
+            {
+
+                foreach (ASClass @class in abc.Classes)
+                {
+                    
+                    bool found = false;
+                    if (@class.Traits.Count > 1 || @class.Instance.Traits.Count > 1)
+                    {
+                        foreach (var trait in @class.Traits)
+                        {
+                            if (trait.QName.Name == "_composers")
+                            {
+                                found = true;
+                                Console.WriteLine("boop");
+                                habboMessagesClass = @class;
+                                break;
+                            }
+                        }
+
+                        if (!found) continue;
+
+                    }
+                    else continue;
+                    
+
+                    /*
+                    if (@class.Traits.Count != 2 || @class.Instance.Traits.Count != 2) continue;
+                    if (@class.Traits[0].Type.Name != "Map" || @class.Traits[1].Type.Name != "Map") continue;
+                    if (@class.Traits[0].Kind != TraitKind.Constant || @class.Traits[1].Kind != TraitKind.Constant) continue;
+                    */
+                    habboMessagesClass = @class;
+                    break;
+                    
+                }
+            }
+
+            if (habboMessagesClass == null)
+            {
+                var abc = ABCFiles.Last();
+
+                IsPostShuffle = false;
+                foreach (ASClass @class in abc.Classes)
+                {
+                    if (@class.Traits.Count != 2) continue;
+                    if (@class.Instance.Traits.Count != 3) continue;
+
+                    habboMessagesClass = @class;
+                    break;
+                }
+                if (habboMessagesClass == null) return;
+            }
+
+            ASCode code = habboMessagesClass.Constructor.Body.ParseCode();
+            int inMapTypeIndex = habboMessagesClass.Traits[0].QNameIndex;
+            int outMapTypeIndex = habboMessagesClass.Traits[1].QNameIndex;
+
             ASInstruction[] instructions = code
                 .Where(i => i.OP == OPCode.GetLex ||
                             i.OP == OPCode.PushShort ||
@@ -1205,7 +1339,14 @@ namespace Sulakore.Habbo.Web
                 ushort id = Convert.ToUInt16(primitive.Value);
 
                 getLexInst = instructions[i + 2] as GetLexIns;
-                ASClass messageClass = abc.GetClass(getLexInst.TypeName);
+
+                ASClass messageClass = null;
+                foreach (var abc in ABCFiles) {
+                    messageClass = abc.GetClass(getLexInst.TypeName);
+
+                    if (messageClass != null) break;
+                }
+
 
                 var message = new MessageItem(messageClass, isOutgoing, id);
                 (isOutgoing ? OutMessages : InMessages).Add(id, message);
@@ -1853,12 +1994,36 @@ namespace Sulakore.Habbo.Web
             }
             else
             {
-                Structure = GetOutgoingStructure(Class);
+                Structure = "";// GetOutgoingStructure(Class);
             }
         }
 
         public string GenerateHash()
         {
+            bool debug = false;
+
+            if (Id == 920 && !IsOutgoing)
+            {
+                debug = true;
+
+                Console.WriteLine("beop");
+            }
+
+            if (Class.Instance.Constructor.Name != null)
+                return Hash = Class.Instance.Constructor.Name;
+            else if (Class.Instance.Traits.Count > 0)
+            {
+                foreach (var trait in Class.Instance.Traits)
+                {
+                    string name = trait.QName.Namespace.Name;
+                    if (name != null && name.Contains(":"))
+                        return Hash = name.Split(":")[1];
+                }
+            }
+           
+
+
+
             if (!string.IsNullOrWhiteSpace(Hash))
             {
                 return Hash;
@@ -1866,12 +2031,17 @@ namespace Sulakore.Habbo.Web
             using (var output = new HashWriter(false))
             {
                 output.Write(IsOutgoing);
+                if (debug) Console.WriteLine(output.GenerateHash());
                 if (!HGame.IsValidIdentifier(Class.QName.Name, true))
                 {
                     output.Write(Class.Instance, true);
+                    if (debug) Console.WriteLine(output.GenerateHash());
                     output.Write(Class.Instance.Constructor);
+                    if (debug) Console.WriteLine(output.GenerateHash());
+
 
                     output.Write(References.Count);
+                    if (debug) Console.WriteLine(output.GenerateHash());
                     foreach (MessageReference reference in References)
                     {
                         output.Write(reference.IsStatic);
@@ -1885,9 +2055,13 @@ namespace Sulakore.Habbo.Web
                         output.Write(reference.FromClass.Constructor);
                         output.Write(reference.FromClass.Instance.Constructor);
                     }
+                    if (debug) Console.WriteLine(output.GenerateHash());
+
                     if (!IsOutgoing && Parser != null)
                     {
-                        output.Write(Parser.Instance, true);
+                        output.Write(Parser.Instance, false);
+                        if (debug) Console.WriteLine(output.GenerateHash());
+
                     }
                 }
                 else output.Write(Class.QName.Name);
@@ -2011,6 +2185,12 @@ namespace Sulakore.Habbo.Web
 
                             switch (previous.OP)
                             {
+                                case OPCode.FindPropStrict:
+                                {
+                                            var findPropStrict = (FindPropStrictIns)previous;
+                                            propertyName = findPropStrict.PropertyName;
+                                            break;
+                                }
                                 case OPCode.GetLex:
                                 {
                                     var getLex = (GetLexIns)previous;
@@ -2032,7 +2212,7 @@ namespace Sulakore.Habbo.Web
                                 }
                             }
 
-                            ASInstance innerInstance = abc.GetInstance(propertyName);
+                            ASInstance innerInstance = previous.OP == OPCode.FindPropStrict ? instance : abc.GetInstance(propertyName);
                             ASMethod innerMethod = innerInstance.GetMethod(callProperty.PropertyName.Name, null, callProperty.ArgCount);
                             if (innerMethod == null)
                             {
@@ -2101,6 +2281,7 @@ namespace Sulakore.Habbo.Web
             }
             return structure;
         }
+
 
         private string GetOutgoingStructure(ASClass @class)
         {

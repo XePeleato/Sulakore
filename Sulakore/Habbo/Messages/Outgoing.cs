@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using Sulakore.Habbo.Web;
+using System.Collections.Generic;
 
 namespace Sulakore.Habbo.Messages
 {
@@ -330,6 +331,10 @@ namespace Sulakore.Habbo.Messages
         { }
         public Outgoing(IList<HMessage> messages)
             : base(true, messages)
+        { }
+
+        public Outgoing(HGame game, string identifiersPath)
+           : base(game, identifiersPath, true)
         { }
     }
 }
